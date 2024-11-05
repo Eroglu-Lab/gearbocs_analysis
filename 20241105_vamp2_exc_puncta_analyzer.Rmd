@@ -1,0 +1,236 @@
+---
+title: "20241105_vamp2_exc_puncta_analyzer"
+author: "Justin Savage"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Goal: this analysis takes CSV file outputs from Puncta Analyzer analysis of synapse counts, combines these into a single data frame, with necessary metadata, performs t-tests, and generates plots.
+
+Experimental Question: Does astrocyte-specific knockout of the gene VAMP2 decrease VGlut1/PSD95 synapse number?
+
+Experimental approach: LSL-Cas9 Mice were retro-orbitally injected with GEARBOCS AAV to knockout VAMP2 specifically in astrocytes. 6 animals were injected with a control virus that contained no CRISPR gRNA and 6 animals were injected with the "VAMP2 TRAP" virus to KO VAMP2. Animals were injected a postnatal day 21 and collected at P42.
+
+Datasets:
+For each CSV file input, each row is measurements from a single Z-projection. Each 3 optical sections of the original 15 Z-stack images were max intensity projected to generate 5 of these Z-projections. 3 separate images were taken from different tissue sections of the the same animal. Images with "CONTROL" in the name received a control AAV while images with "VAMP2 TRAP" received an AAV to KO VAMP2. 
+
+1. "Vamp2 Vglut1 and Psd95.csv" 
+2. "Vamp2-Vglut1 Psd95-2.csv"
+3. "Vamp2-glut1-psd95-3.csv"
+
+```{r load packages}
+
+library(tidyverse)
+library(ggplot2)
+library(agricolae)
+library(ggsignif)
+library(multcomp)
+library(nlme)
+
+```
+
+```{r load data}
+
+data_cleaned_1 <- read_csv("Vamp2 Vglut1 and Psd95.csv")
+data_cleaned_2 <- read_csv("Vamp2-Vglut1 Psd95-2.csv")
+data_cleaned_3 <- read_csv("Vamp2-glut1-psd95-3.csv")
+
+data_combined <- rbind(data_cleaned_1, data_cleaned_2, data_cleaned_3)
+
+data_cleaned <- data.frame(data_combined$`Image name`)
+data_cleaned$red_puncta_count <- data_combined$`Num puncta`
+data_cleaned$green_puncta_count <- data_combined$...10
+data_cleaned$coloc_puncta_count <- data_combined$...22
+
+colnames(data_cleaned) <- c("Image", "red_puncta_count", "green_puncta_count" , "coloc_puncta_count")
+
+#initialize condition
+data_cleaned$condition <- "control"
+
+#label data with experimental condition
+data_cleaned[which(grepl("*CONTROL*", data_cleaned$Image)),]$condition <- "control"
+data_cleaned[which(grepl("*VAMP2 TRAP*", data_cleaned$Image)),]$condition <- "Vamp2 Trap"
+
+#make condition a factor so that it always plots in control then VAMP2 TRAP order
+data_cleaned$condition <- factor(data_cleaned$condition, levels = c("control", "Vamp2 Trap"))
+```
+
+
+```{r plot data}
+
+ggplot(data_cleaned) + geom_violin(aes(x = condition, y = coloc_puncta_count))
+
+```
+
+```{r label pair}
+
+#Dani took three images from each pair in order 
+#for example, images ending in "V1-", V1_0001", and "V1_0002" all came from pair 1
+
+#initialize condition
+data_cleaned$pair <- -1
+
+#label data with pair number
+data_cleaned[which(grepl("V1-", data_cleaned$Image)),]$pair <- 1
+data_cleaned[which(grepl("V1_0001", data_cleaned$Image)),]$pair <- 1
+data_cleaned[which(grepl("V1_0002", data_cleaned$Image)),]$pair <- 1
+
+data_cleaned[which(grepl("V1_0003", data_cleaned$Image)),]$pair <- 2
+data_cleaned[which(grepl("V1_0004", data_cleaned$Image)),]$pair <- 2
+data_cleaned[which(grepl("V1_0005", data_cleaned$Image)),]$pair <- 2
+
+data_cleaned[which(grepl("V1_0006", data_cleaned$Image)),]$pair <- 3
+data_cleaned[which(grepl("V1_0007", data_cleaned$Image)),]$pair <- 3
+data_cleaned[which(grepl("V1_0008", data_cleaned$Image)),]$pair <- 3
+
+data_cleaned[which(grepl("V1_0009", data_cleaned$Image)),]$pair <- 4
+data_cleaned[which(grepl("V1_0010", data_cleaned$Image)),]$pair <- 4
+data_cleaned[which(grepl("V1_0011", data_cleaned$Image)),]$pair <- 4
+
+data_cleaned[which(grepl("V1_0012", data_cleaned$Image)),]$pair <- 5
+data_cleaned[which(grepl("V1_0013", data_cleaned$Image)),]$pair <- 5
+data_cleaned[which(grepl("V1_0014", data_cleaned$Image)),]$pair <- 5
+
+data_cleaned[which(grepl("V1_0015", data_cleaned$Image)),]$pair <- 6
+data_cleaned[which(grepl("V1_0016", data_cleaned$Image)),]$pair <- 6
+data_cleaned[which(grepl("V1_0017", data_cleaned$Image)),]$pair <- 6
+
+```
+
+
+
+```{r normalize to overall WT mean}
+
+#calculate means for each condition
+cond_means <- summarize(group_by(data_cleaned, condition), mean(coloc_puncta_count))
+
+#calculate condition means for each pair
+raw_means <- summarize(group_by(data_cleaned, condition, pair), mean(coloc_puncta_count))
+
+#normalize count by pair
+data_cleaned$normalized_count <- 0
+
+control_mean <- cond_means$`mean(coloc_puncta_count)`[which(grepl("control", cond_means$condition))]
+
+data_cleaned[which(grepl(1, data_cleaned$pair)),]$normalized_count <- data_cleaned$coloc_puncta_count[which(grepl(1, data_cleaned$pair))]/control_mean
+
+data_cleaned[which(grepl(2, data_cleaned$pair)),]$normalized_count <- data_cleaned$coloc_puncta_count[which(grepl(2, data_cleaned$pair))]/control_mean
+
+data_cleaned[which(grepl(3, data_cleaned$pair)),]$normalized_count <- data_cleaned$coloc_puncta_count[which(grepl(3, data_cleaned$pair))]/control_mean
+
+data_cleaned[which(grepl(4, data_cleaned$pair)),]$normalized_count <- data_cleaned$coloc_puncta_count[which(grepl(4, data_cleaned$pair))]/control_mean
+
+data_cleaned[which(grepl(5, data_cleaned$pair)),]$normalized_count <- data_cleaned$coloc_puncta_count[which(grepl(5, data_cleaned$pair))]/control_mean
+
+data_cleaned[which(grepl(6, data_cleaned$pair)),]$normalized_count <- data_cleaned$coloc_puncta_count[which(grepl(6, data_cleaned$pair))]/control_mean
+```
+
+
+```{r stats}
+
+t.test(`mean(coloc_puncta_count)` ~ condition, raw_means)
+
+data_grouped <- nlme::groupedData(coloc_puncta_count ~ condition | pair, data = data_cleaned)
+
+data_lme <- nlme::lme(data_grouped)
+
+
+data_tukeys <- summary(glht(data_lme, linfct=mcp(condition="Tukey")))
+#data_tukeys
+data_tukeysPH <- data.frame(as.character(row.names(data_tukeys$linfct)), data_tukeys$test$pvalues)
+
+p_value <- data_tukeysPH$data_tukeys.test.pvalues[1]
+print(paste("manual p value: ", p_value))
+
+
+
+```
+
+
+```{r plot by pair}
+
+average_colocs <- summarize(group_by(data_cleaned, pair, condition), mean(coloc_puncta_count))
+
+t.test(`mean(coloc_puncta_count)` ~ condition, data = summarize(group_by(data_cleaned, condition, pair), mean(coloc_puncta_count)))
+
+ggplot(summarize(group_by(data_cleaned, condition), mean(coloc_puncta_count)), aes(x = condition, y = `mean(coloc_puncta_count)`)) + 
+  geom_col(fill = NA, color = "black") + 
+  geom_jitter(data = summarize(group_by(data_cleaned, condition, pair), mean(coloc_puncta_count)), aes(x = condition, y = `mean(coloc_puncta_count)`)) +
+  labs(title = "VGlut1/PSD95 synapses", y = "Colocalized Puncta per Image") +
+  annotate("text", x = 2, y = 2000, label = "p<0.001")
+
+```
+
+
+
+
+```{r normalized stats}
+
+#calculate normalized condition means for each pair
+norm_means <- summarize(group_by(data_cleaned, condition, pair), mean(normalized_count))
+
+t.test(`mean(normalized_count)` ~ condition, data = norm_means)
+
+data_grouped <- nlme::groupedData(normalized_count ~ condition | pair, data = data_cleaned)
+
+data_lme <- nlme::lme(data_grouped)
+
+data_lme
+summary(data_lme)
+anova(data_lme)
+
+data_tukeys <- summary(glht(data_lme, linfct=mcp(condition="Tukey")))
+data_tukeys
+data_tukeysPH <- data.frame(as.character(row.names(data_tukeys$linfct)), data_tukeys$test$pvalues)
+
+#calculate sem = sd/sqrt(n)
+sem_wt <- sd(norm_means$`mean(normalized_count)`[which(grepl("control", norm_means$condition))])/sqrt(length(norm_means$condition[which(grepl("control", norm_means$condition))]))
+
+sem_ko <- sd(norm_means$`mean(normalized_count)`[which(grepl("Vamp2 Trap", norm_means$condition))])/sqrt(length(norm_means$condition[which(grepl("Vamp2 Trap", norm_means$condition))]))
+
+data_cleaned$sem <- 0
+data_cleaned$sem[which(grepl("control", data_cleaned$condition))] <- sem_wt
+data_cleaned$sem[which(grepl("Vamp2 Trap", data_cleaned$condition))] <- sem_ko
+
+#add normalized count to data frame
+data_cleaned$mean_normalized_count <- 0
+data_cleaned$mean_normalized_count[which(grepl("control", data_cleaned$condition))] <- mean(data_cleaned$normalized_count[which(grepl("control", data_cleaned$condition))])
+data_cleaned$mean_normalized_count[which(grepl("Vamp2 Trap", data_cleaned$condition))] <- mean(data_cleaned$normalized_count[which(grepl("Vamp2 Trap", data_cleaned$condition))])
+
+
+
+
+```
+
+
+```{r plot normalized synapse counts}
+
+plot.df <- summarize(group_by(data_cleaned, condition), mean(normalized_count))
+plot.df$sem <- 0
+plot.df$sem[which(grepl("control", plot.df$condition))] <- sem_wt
+plot.df$sem[which(grepl("Vamp2 Trap", plot.df$condition))] <- sem_ko
+
+
+
+ggplot(plot.df, aes(x = condition, y = `mean(normalized_count)`)) + 
+  geom_col(fill = NA, color = "black") + 
+  geom_jitter(data = data_cleaned, aes(x = condition, y = normalized_count), color = "darkgray", size = 0.5) +
+  geom_point(data = norm_means, aes(x = condition, y = `mean(normalized_count)`), size = 2, position = position_dodge2(0.5), shape = 17) +
+  #annotate("text", x = 1, y = 3, label = "p<0.001") +
+  geom_errorbar(aes(ymin=`mean(normalized_count)`-sem, ymax=`mean(normalized_count)`+sem), width=.2) +
+  labs(y = "Fold change in synapse number \n (colocalization of VGluT1 and PSD95)") +
+  scale_color_manual(values = c("black", "black")) + theme(legend.position = "none") + 
+  theme_bw()
+  
+
+
+# ggsave("vamp2_exc_puncta_analyzer_v2.pdf", width = 3, height = 4)
+# ggsave("vamp2_exc_puncta_analyzer_v2.png", width = 3, height = 4)
+
+
+```
+
